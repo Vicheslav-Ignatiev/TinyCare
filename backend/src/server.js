@@ -1,6 +1,7 @@
 const express = require("express");
 const cors = require("cors");
 const { MongoClient } = require("mongodb");
+const childrenRouter = require("./routes/children");
 
 const PORT = Number(process.env.PORT || 4000);
 const MONGODB_URI = process.env.MONGODB_URI || "mongodb://mongo:27017";
@@ -9,6 +10,7 @@ const DB_NAME = process.env.DB_NAME || "tinycare";
 const app = express();
 app.use(cors());
 app.use(express.json());
+app.use("/api/children", childrenRouter);
 
 let client;
 let db;
@@ -35,9 +37,14 @@ app.get("/api/health", async (req, res) => {
     }
 });
 
-app.listen(PORT, () => {
-    console.log(`Backend listening on port ${PORT}`);
-});
+(async () => {
+    const database = await getDb();
+    app.locals.db = database;
+
+    app.listen(PORT, () => {
+        console.log(`Server running on port ${PORT}`);
+    });
+})();
 
 // корректное завершение (для Docker)
 process.on("SIGINT", async () => {
