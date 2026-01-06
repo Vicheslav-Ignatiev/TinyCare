@@ -44,8 +44,13 @@ services:
       dockerfile: Dockerfile
     container_name: tinycare-frontend
     restart: unless-stopped
+    volumes:
+      - ../frontend:/app
+      - /app/node_modules
+    command: npm run dev -- --host 0.0.0.0 --port 5173
     networks:
       - tinycare_net
+
 
   nginx:
     image: nginx:1.27-alpine
