@@ -2,6 +2,7 @@ const express = require("express");
 const cors = require("cors");
 const { MongoClient } = require("mongodb");
 const childrenRouter = require("./routes/children");
+const feedingsRouter = require("./routes/feedings");
 
 
 const PORT = Number(process.env.PORT || 4000);
@@ -12,6 +13,8 @@ const app = express();
 app.use(cors());
 app.use(express.json());
 app.use("/api/children", childrenRouter);
+app.use("/api/feedings", feedingsRouter);
+
 
 let client;
 let db;
