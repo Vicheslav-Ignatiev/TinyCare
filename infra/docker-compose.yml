@@ -19,7 +19,7 @@ services:
       ME_CONFIG_MONGODB_PORT: 27017
       ME_CONFIG_BASICAUTH: "false"
     ports:
-      - "8081:8081"
+      - "0.0.0.0:8081:8081"  # Bind to all interfaces
     networks:
       - tinycare_net
 
@@ -60,7 +60,7 @@ services:
       - frontend
       - backend
     ports:
-      - "8080:80"
+      - "0.0.0.0:8080:80"  # Changed: Bind to all interfaces
     volumes:
       - ./nginx.conf:/etc/nginx/nginx.conf:ro
     networks:

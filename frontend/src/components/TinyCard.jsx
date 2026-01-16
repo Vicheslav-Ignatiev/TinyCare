@@ -11,13 +11,12 @@ import babyEating from "../assets/eating2.png";
 import babyBurp1 from "../assets/burp1.png";
 import babyBurp2 from "../assets/burp2.png";
 import ConfirmationScreen from "./ConfirmationScreen.jsx";
-
-
 import AnimatedIcon from "./AnimatedIcon.jsx";
-
+import PoopConfirmation from "./PoopConfirmation.jsx";
 
 const FEED_DURATION_MINUTES_DEFAULT = 20;
 const BURP_DURATION_MINUTES_DEFAULT = 10;
+const MAX_SESSION_AGE_MS = 3 * 60 * 60 * 1000; // 3 hours
 
 function pad2(n) {
     return String(n).padStart(2, "0");
@@ -30,18 +29,69 @@ function formatMMSS(totalSeconds) {
     return `${pad2(mm)}:${pad2(ss)}`;
 }
 
+// Helper functions for localStorage persistence
+function getStorageKey(babyId) {
+    return `tinycare_session_${babyId}`;
+}
+
+function saveSessionToStorage(babyId, sessionState) {
+    try {
+        const key = getStorageKey(babyId);
+        const data = {
+            ...sessionState,
+            savedAt: Date.now()
+        };
+        localStorage.setItem(key, JSON.stringify(data));
+    } catch (error) {
+        console.error("Failed to save session to storage:", error);
+    }
+}
+
+function loadSessionFromStorage(babyId) {
+    try {
+        const key = getStorageKey(babyId);
+        const stored = localStorage.getItem(key);
+        if (!stored) return null;
+
+        const data = JSON.parse(stored);
+        const age = Date.now() - data.savedAt;
+
+        // Discard sessions older than MAX_SESSION_AGE_MS
+        if (age > MAX_SESSION_AGE_MS) {
+            localStorage.removeItem(key);
+            return null;
+        }
+
+        return data;
+    } catch (error) {
+        console.error("Failed to load session from storage:", error);
+        return null;
+    }
+}
+
+function clearSessionFromStorage(babyId) {
+    try {
+        const key = getStorageKey(babyId);
+        localStorage.removeItem(key);
+    } catch (error) {
+        console.error("Failed to clear session from storage:", error);
+    }
+}
 
 export default function TinyCard({ tiny, onDelete }) {
     const [open, setOpen] = useState(false);
     const [feeding, setFeeding] = useState(null);
     const [burping, setBurping] = useState(null);
-    // feeding/burping = { totalSec, remainingSec, startedAtMs }
-    const feedDurationMinutes = FEED_DURATION_MINUTES_DEFAULT;
-    const burpDurationMinutes = BURP_DURATION_MINUTES_DEFAULT;
     const [showMlInput, setShowMlInput] = useState(false);
     const [mlAmount, setMlAmount] = useState("");
     const [showConfirmation, setShowConfirmation] = useState(false);
     const [lastFeeding, setLastFeeding] = useState(null);
+    const [sessionDraft, setSessionDraft] = useState(null);
+    const [isRestored, setIsRestored] = useState(false);
+    const [showDiaperConfirm, setShowDiaperConfirm] = useState(false);
+
+    const feedDurationMinutes = FEED_DURATION_MINUTES_DEFAULT;
+    const burpDurationMinutes = BURP_DURATION_MINUTES_DEFAULT;
 
     const totalFeedSec = useMemo(
         () => Math.max(1, Math.floor(feedDurationMinutes * 60)),
@@ -52,75 +102,150 @@ export default function TinyCard({ tiny, onDelete }) {
         [burpDurationMinutes]
     );
 
-    const [sessionDraft, setSessionDraft] = useState(null);
-    // { babyId, feedStartedAtMs, feedDurationSec, burpDurationSec }
+    // Restore session from localStorage on mount
+    useEffect(() => {
+        const restored = loadSessionFromStorage(tiny._id);
+        if (!restored) {
+            setIsRestored(true);
+            return;
+        }
 
+        const now = Date.now();
+
+        // Restore feeding state
+        if (restored.feeding) {
+            const elapsedSec = Math.floor((now - restored.feeding.startedAtMs) / 1000);
+            const remainingSec = Math.max(0, restored.feeding.totalSec - elapsedSec);
+
+            if (remainingSec > 0) {
+                // Still feeding
+                setFeeding({
+                    totalSec: restored.feeding.totalSec,
+                    remainingSec: remainingSec,
+                    startedAtMs: restored.feeding.startedAtMs
+                });
+                setSessionDraft(restored.sessionDraft);
+                setOpen(false);
+            } else {
+                // Feeding timer expired while away - auto-advance to burping
+                const feedDur = Math.floor((now - restored.feeding.startedAtMs) / 1000);
+                setSessionDraft({
+                    ...restored.sessionDraft,
+                    feedDurationSec: feedDur
+                });
+                setBurping({
+                    totalSec: totalBurpSec,
+                    remainingSec: totalBurpSec,
+                    startedAtMs: now
+                });
+            }
+        }
+        // Restore burping state
+        else if (restored.burping) {
+            const elapsedSec = Math.floor((now - restored.burping.startedAtMs) / 1000);
+            const remainingSec = Math.max(0, restored.burping.totalSec - elapsedSec);
+
+            if (remainingSec > 0) {
+                // Still burping
+                setBurping({
+                    totalSec: restored.burping.totalSec,
+                    remainingSec: remainingSec,
+                    startedAtMs: restored.burping.startedAtMs
+                });
+                setSessionDraft(restored.sessionDraft);
+                setOpen(false);
+            } else {
+                // Burping timer expired - show ML input
+                const burpDur = Math.floor((now - restored.burping.startedAtMs) / 1000);
+                setSessionDraft({
+                    ...restored.sessionDraft,
+                    burpDurationSec: burpDur
+                });
+                setShowMlInput(true);
+            }
+        }
+        // Restore ML input state
+        else if (restored.showMlInput) {
+            setSessionDraft(restored.sessionDraft);
+            setMlAmount(restored.mlAmount || "");
+            setShowMlInput(true);
+        }
+        // Restore confirmation state
+        else if (restored.showConfirmation) {
+            setSessionDraft(restored.sessionDraft);
+            setMlAmount(restored.mlAmount || "");
+            setShowConfirmation(true);
+        }
+
+        setIsRestored(true);
+    }, [tiny._id, totalBurpSec]);
+
+    // Save session to localStorage whenever state changes
+    useEffect(() => {
+        if (!isRestored) return; // Don't save during initial restore
+
+        if (feeding || burping || showMlInput || showConfirmation) {
+            const sessionState = {
+                feeding,
+                burping,
+                sessionDraft,
+                showMlInput,
+                mlAmount,
+                showConfirmation
+            };
+            saveSessionToStorage(tiny._id, sessionState);
+        } else {
+            // Clear storage when no active session
+            clearSessionFromStorage(tiny._id);
+        }
+    }, [feeding, burping, showMlInput, mlAmount, showConfirmation, sessionDraft, tiny._id, isRestored]);
+
+    // Fetch last feeding
     useEffect(() => {
         async function fetchLastFeeding() {
             try {
-                // Step 1: Build the URL with the baby's ID
                 const response = await fetch(`/api/feedings/last/${tiny._id}`);
-
-                // Step 2: Parse the JSON response
                 const result = await response.json();
-
-                // Step 3: Check if the request was successful
                 if (result.ok && result.data) {
-                    // Step 4: Update state with the feeding data
                     setLastFeeding(result.data);
                 } else {
-                    // No feeding found or error - keep as null
                     setLastFeeding(null);
                 }
             } catch (error) {
                 console.error("Error fetching last feeding:", error);
-                // On error, keep state as null
                 setLastFeeding(null);
             }
         }
-
         fetchLastFeeding();
-    }, []);
+    }, [tiny._id]);
 
-
+    // Feeding timer
     useEffect(() => {
         if (!feeding) return;
 
         const id = setInterval(() => {
             setFeeding((prev) => {
                 if (!prev) return prev;
-
                 const now = Date.now();
                 const elapsedSec = Math.floor((now - prev.startedAtMs) / 1000);
                 const remaining = Math.max(0, prev.totalSec - elapsedSec);
                 return { ...prev, remainingSec: remaining };
             });
-            setFeedSessionDraft({
-                babyId: tiny._id,
-                feedStartedAtMs: now,
-                feedEndedAtMs: null,
-                burpStartedAtMs: null,
-                burpEndedAtMs: null,
-            });
-
         }, 250);
-
 
         return () => clearInterval(id);
     }, [feeding]);
 
-    // Add this after the feeding useEffect:
+    // Burping timer
     useEffect(() => {
         if (!burping) return;
 
         const id = setInterval(() => {
             setBurping((prev) => {
                 if (!prev) return prev;
-
                 const now = Date.now();
                 const elapsedSec = Math.floor((now - prev.startedAtMs) / 1000);
                 const remaining = Math.max(0, prev.totalSec - elapsedSec);
-
                 return { ...prev, remainingSec: remaining };
             });
         }, 250);
@@ -140,21 +265,17 @@ export default function TinyCard({ tiny, onDelete }) {
         return (done / burping.totalSec) * 100;
     }, [burping]);
 
-
-
     function startFeeding(e) {
         e.stopPropagation();
         setOpen(false);
 
         const now = Date.now();
-
         setSessionDraft({
             babyId: tiny._id,
             feedStartedAtMs: now,
             feedDurationSec: null,
             burpDurationSec: null,
         });
-
         setFeeding({
             totalSec: totalFeedSec,
             remainingSec: totalFeedSec,
@@ -163,33 +284,26 @@ export default function TinyCard({ tiny, onDelete }) {
     }
 
 
-
     function handleMlSubmit() {
         const ml = parseInt(mlAmount, 10);
         if (isNaN(ml) || ml <= 0) {
             alert("Please enter a valid amount");
             return;
         }
-
-        // Move to confirmation screen
         setShowMlInput(false);
         setShowConfirmation(true);
     }
-
 
     async function handleConfirmSave() {
         try {
             const ml = parseInt(mlAmount, 10);
             const d = sessionDraft;
 
-            console.log("Session draft:", d);
-
             if (!d?.babyId || !d?.feedStartedAtMs || d.feedDurationSec == null || d.burpDurationSec == null) {
                 alert("Session timing is incomplete");
                 return;
             }
 
-            // Ensure babyId is a string (MongoDB ObjectId)
             const babyIdString = typeof d.babyId === 'object' && d.babyId._id
                 ? d.babyId._id
                 : String(d.babyId);
@@ -202,8 +316,6 @@ export default function TinyCard({ tiny, onDelete }) {
                 ml: Number(ml),
             };
 
-            console.log("Sending payload:", payload);
-
             const response = await fetch("/api/feedings", {
                 method: "POST",
                 headers: { "Content-Type": "application/json" },
@@ -211,7 +323,6 @@ export default function TinyCard({ tiny, onDelete }) {
             });
 
             const result = await response.json();
-            console.log("Server response:", result);
 
             if (!response.ok || !result.ok) {
                 alert(`Failed to save: ${result.error?.message || 'Unknown error'}`);
@@ -220,50 +331,16 @@ export default function TinyCard({ tiny, onDelete }) {
 
             alert("Feeding session saved successfully!");
 
-            // reset
+            // Clear all state and storage
             setShowConfirmation(false);
             setMlAmount("");
             setSessionDraft(null);
+            clearSessionFromStorage(tiny._id);
         } catch (error) {
             console.error("Error saving feeding:", error);
             alert(`Error: ${error.message}`);
         }
     }
-
-
-    async function handleSaveMl() {
-        const ml = parseInt(mlAmount, 10);
-        if (isNaN(ml) || ml <= 0) {
-            alert("Please enter a valid amount");
-            return;
-        }
-
-        const d = sessionDraft;
-        if (!d?.babyId || !d?.feedStartedAtMs || d.feedDurationSec == null || d.burpDurationSec == null) {
-            alert("Session timing is incomplete");
-            return;
-        }
-
-        const payload = {
-            babyId: d.babyId,
-            feedStartedAt: new Date(d.feedStartedAtMs).toISOString(),
-            feedDurationSec: d.feedDurationSec,
-            burpDurationSec: d.burpDurationSec,
-            ml,
-        };
-
-        await fetch("/api/feedings", {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify(payload),
-        });
-
-        // reset
-        setShowMlInput(false);
-        setMlAmount("");
-        setSessionDraft(null);
-    }
-
 
     const isFeedingActive = Boolean(feeding);
     const isBurpingActive = Boolean(burping);
@@ -311,13 +388,11 @@ export default function TinyCard({ tiny, onDelete }) {
                     width: "100%",
                 }}
             >
-                <div style={{ flexShrink: 0 }}>
+                <div style={{ flexShrink: 0, width: "clamp(80px, 25vw, 128px)", maxWidth: "128px" }}>
                     <BlinkingBabyIcon size={128} />
                 </div>
 
-                {/* This div contains ALL the text - name, birth date, and last feeding */}
                 <div style={{ minWidth: 0, flex: 1, overflow: "hidden" }}>
-                    {/* Baby name */}
                     <div
                         style={{
                             fontWeight: 600,
@@ -329,15 +404,13 @@ export default function TinyCard({ tiny, onDelete }) {
                         {tiny.name}
                     </div>
 
-
-                    {/* Last feeding - now inside the same column */}
                     {lastFeeding ? (
                         <div
                             style={{
-                                fontSize: "clamp(11px, 2.8vw, 12px)",
-                                color: "rgba(76, 175, 80, 0.9)",
-                                marginTop: 4,
-                                fontWeight: 500,
+                                fontWeight: 600,
+                                marginBottom: 4,
+                                fontSize: "clamp(15px, 3.8vw, 17px)",
+                                wordBreak: "break-word",
                             }}
                         >
                             🍼 Last fed: {new Date(lastFeeding.feedStartedAt).toLocaleString('en-US', {
@@ -388,30 +461,24 @@ export default function TinyCard({ tiny, onDelete }) {
                         {formatMMSS(feeding.remainingSec)}
                     </div>
 
-                    {/* Кнопки управления (минимум, чтобы не мешали). Удалишь/переделаешь потом */}
                     <div style={{ display: "flex", gap: 10, marginTop: 6 }}>
                         <button
                             type="button"
                             onClick={() => {
                                 const now = Date.now();
-
                                 const feedDur = feeding
                                     ? Math.max(0, Math.round((now - feeding.startedAtMs) / 1000))
                                     : 0;
 
                                 setSessionDraft(prev => prev ? { ...prev, feedDurationSec: feedDur } : prev);
-
                                 setFeeding(null);
 
-                                // стартуем burp тем же now
                                 setBurping({
                                     totalSec: totalBurpSec,
                                     remainingSec: totalBurpSec,
                                     startedAtMs: now,
                                 });
                             }}
-
-
                             style={{
                                 padding: "10px 14px",
                                 borderRadius: 12,
@@ -443,7 +510,7 @@ export default function TinyCard({ tiny, onDelete }) {
                     onClick={(e) => e.stopPropagation()}
                 >
                     <ProgressRing
-                        value={burpingProgressPercent}  // Changed from feedingProgressPercent
+                        value={burpingProgressPercent}
                         centerNode={
                             <AnimatedIcon
                                 image1={babyBurp1}
@@ -465,23 +532,19 @@ export default function TinyCard({ tiny, onDelete }) {
                         {formatMMSS(burping.remainingSec)}
                     </div>
 
-                    {/* Кнопки управления (минимум, чтобы не мешали). Удалишь/переделаешь потом */}
                     <div style={{ display: "flex", gap: 10, marginTop: 6 }}>
                         <button
                             type="button"
                             onClick={() => {
                                 const now = Date.now();
-
                                 const burpDur = burping
                                     ? Math.max(0, Math.round((now - burping.startedAtMs) / 1000))
                                     : 0;
 
                                 setSessionDraft(prev => prev ? { ...prev, burpDurationSec: burpDur } : prev);
-
                                 setBurping(null);
                                 setShowMlInput(true);
                             }}
-
                             style={{
                                 padding: "10px 14px",
                                 borderRadius: 12,
@@ -542,7 +605,7 @@ export default function TinyCard({ tiny, onDelete }) {
                         }}
                         onKeyPress={(e) => {
                             if (e.key === "Enter") {
-                                handleSaveMl();
+                                handleMlSubmit();
                             }
                         }}
                     />
@@ -586,8 +649,20 @@ export default function TinyCard({ tiny, onDelete }) {
                 />
             ) : null}
 
-            {/* Action buttons - responsive grid */}
-            {open && !isFeedingActive && !isBurpingActive && !showMlInput && !showConfirmation && (
+            {showDiaperConfirm ? (
+                <PoopConfirmation
+                    tiny={tiny}
+                    onSave={() => {
+                        setShowDiaperConfirm(false);
+                    }}
+                    onCancel={() => {
+                        setShowDiaperConfirm(false);
+                    }}
+                />
+            ) : null}
+
+            {/* Action buttons */}
+            {open && !isFeedingActive && !isBurpingActive && !showMlInput && !showConfirmation && !showDiaperConfirm && (
                 <div
                     style={{
                         paddingTop: 12,
@@ -605,7 +680,8 @@ export default function TinyCard({ tiny, onDelete }) {
                         iconSrc={diaperIcon}
                         onClick={(e) => {
                             e.stopPropagation();
-                            console.log("Diaper");
+                            setOpen(false);
+                            setShowDiaperConfirm(true);
                         }}
                     />
                     <ActionButton
