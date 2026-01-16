@@ -13,6 +13,11 @@ import babyBurp2 from "../assets/burp2.png";
 import ConfirmationScreen from "./ConfirmationScreen.jsx";
 import AnimatedIcon from "./AnimatedIcon.jsx";
 import PoopConfirmation from "./PoopConfirmation.jsx";
+import MlInput from "./Mlinput.jsx";
+import StatisticsViewSelector from "./StatisticsViewSelector.jsx";
+import DailyStatistics from "./DailyStatistics.jsx";
+import WeeklyStatistics from "./WeeklyStatistics.jsx";
+
 
 const FEED_DURATION_MINUTES_DEFAULT = 20;
 const BURP_DURATION_MINUTES_DEFAULT = 10;
@@ -89,6 +94,9 @@ export default function TinyCard({ tiny, onDelete }) {
     const [sessionDraft, setSessionDraft] = useState(null);
     const [isRestored, setIsRestored] = useState(false);
     const [showDiaperConfirm, setShowDiaperConfirm] = useState(false);
+    const [showStatsSelector, setShowStatsSelector] = useState(false);
+    const [showDailyStats, setShowDailyStats] = useState(false);
+    const [showWeeklyStats, setShowWeeklyStats] = useState(false);
 
     const feedDurationMinutes = FEED_DURATION_MINUTES_DEFAULT;
     const burpDurationMinutes = BURP_DURATION_MINUTES_DEFAULT;
@@ -563,71 +571,14 @@ export default function TinyCard({ tiny, onDelete }) {
 
             {/* ML INPUT UI */}
             {showMlInput ? (
-                <div
-                    style={{
-                        borderTop: "1px solid rgba(255,255,255,0.15)",
-                        paddingTop: 14,
-                        display: "flex",
-                        alignItems: "center",
-                        justifyContent: "center",
-                        flexDirection: "column",
-                        gap: 14,
+                <MlInput
+                    onSubmit={(ml) => {
+                        setMlAmount(String(ml));
+                        setShowMlInput(false);
+                        setShowConfirmation(true);
                     }}
-                    onClick={(e) => e.stopPropagation()}
-                >
-                    <div
-                        style={{
-                            fontSize: 16,
-                            fontWeight: 600,
-                            color: "rgba(255,255,255,0.9)",
-                        }}
-                    >
-                        How many ml did the baby eat?
-                    </div>
-
-                    <input
-                        type="number"
-                        value={mlAmount}
-                        onChange={(e) => setMlAmount(e.target.value)}
-                        placeholder="Enter ml"
-                        autoFocus
-                        style={{
-                            width: "200px",
-                            padding: "12px 16px",
-                            borderRadius: 12,
-                            border: "1px solid rgba(255,255,255,0.2)",
-                            background: "rgba(255,255,255,0.08)",
-                            color: "rgba(255,255,255,0.95)",
-                            fontSize: 16,
-                            fontWeight: 600,
-                            textAlign: "center",
-                            outline: "none",
-                        }}
-                        onKeyPress={(e) => {
-                            if (e.key === "Enter") {
-                                handleMlSubmit();
-                            }
-                        }}
-                    />
-
-                    <div style={{ display: "flex", gap: 10, marginTop: 6 }}>
-                        <button
-                            type="button"
-                            onClick={handleMlSubmit}
-                            style={{
-                                padding: "10px 20px",
-                                borderRadius: 12,
-                                border: "1px solid rgba(76, 175, 80, 0.3)",
-                                background: "rgba(76, 175, 80, 0.15)",
-                                color: "#4CAF50",
-                                cursor: "pointer",
-                                fontWeight: 600,
-                            }}
-                        >
-                            Next
-                        </button>
-                    </div>
-                </div>
+                    onCancel={() => setShowMlInput(false)}
+                />
             ) : null}
 
             {showConfirmation && sessionDraft ? (
@@ -660,9 +611,57 @@ export default function TinyCard({ tiny, onDelete }) {
                     }}
                 />
             ) : null}
+            {showStatsSelector ? (
+                <StatisticsViewSelector
+                    tiny={tiny}
+                    onSelectDaily={() => {
+                        setShowStatsSelector(false);
+                        setShowDailyStats(true);
+                    }}
+                    onSelectWeekly={() => {
+                        setShowStatsSelector(false);
+                        setShowWeeklyStats(true);
+                    }}
+                    onCancel={() => {
+                        setShowStatsSelector(false);
+                    }}
+                />
+            ) : null}
+
+            {/* DAILY STATISTICS */}
+            {showDailyStats ? (
+                <DailyStatistics
+                    tiny={tiny}
+                    onBack={() => {
+                        setShowDailyStats(false);
+                        setShowStatsSelector(true); // Go back to selector
+                    }}
+                />
+            ) : null}
+
+            {/* WEEKLY STATISTICS */}
+            {showWeeklyStats ? (
+                <WeeklyStatistics
+                    tiny={tiny}
+                    onBack={() => {
+                        setShowWeeklyStats(false);
+                        setShowStatsSelector(true); // Go back to selector
+                    }}
+                />
+            ) : null}
+
+
 
             {/* Action buttons */}
-            {open && !isFeedingActive && !isBurpingActive && !showMlInput && !showConfirmation && !showDiaperConfirm && (
+            {open &&
+                !isFeedingActive &&
+                !isBurpingActive &&
+                !showMlInput &&
+                !showConfirmation &&
+                !showDiaperConfirm &&
+                !showStatsSelector &&
+                !showDailyStats &&
+                !showWeeklyStats &&(
                 <div
                     style={{
                         paddingTop: 12,
@@ -689,7 +688,8 @@ export default function TinyCard({ tiny, onDelete }) {
                         iconSrc={statsIcon}
                         onClick={(e) => {
                             e.stopPropagation();
-                            console.log("Stats");
+                            setOpen(false);
+                            setShowStatsSelector(true);
                         }}
                     />
                     <ActionButton

@@ -80,4 +80,36 @@ router.get("/last/:babyId", async (req, res) => {
 });
 
 
+// GET /api/feedings/:babyId - Get all feedings for a baby
+// IMPORTANT: This route must come AFTER /last/:babyId to avoid route conflicts
+router.get("/:babyId", async (req, res) => {
+    try {
+        const { babyId } = req.params;
+
+        if (!ObjectId.isValid(babyId)) {
+            return res.status(400).json({
+                ok: false,
+                error: { message: "Invalid baby ID" }
+            });
+        }
+
+        const db = req.app.locals.db;
+
+        const feedings = await db
+            .collection("feedings")
+            .find({ babyId: new ObjectId(babyId) })
+            .sort({ feedStartedAt: -1 })
+            .toArray();
+
+        return res.json({ ok: true, data: feedings });
+    } catch (err) {
+        console.error("Error fetching feedings:", err);
+        return res.status(500).json({
+            ok: false,
+            error: { message: "Failed to fetch feedings" }
+        });
+    }
+});
+
+
 module.exports = router;
