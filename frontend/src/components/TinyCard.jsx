@@ -291,7 +291,6 @@ export default function TinyCard({ tiny, onDelete }) {
         });
     }
 
-
     function handleMlSubmit() {
         const ml = parseInt(mlAmount, 10);
         if (isNaN(ml) || ml <= 0) {
