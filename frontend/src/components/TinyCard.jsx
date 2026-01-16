@@ -12,6 +12,7 @@ import babyBurp1 from "../assets/burp1.png";
 import babyBurp2 from "../assets/burp2.png";
 import ConfirmationScreen from "./ConfirmationScreen.jsx";
 import AnimatedIcon from "./AnimatedIcon.jsx";
+import PoopConfirmation from "./PoopConfirmation.jsx";
 
 const FEED_DURATION_MINUTES_DEFAULT = 20;
 const BURP_DURATION_MINUTES_DEFAULT = 10;
@@ -87,6 +88,7 @@ export default function TinyCard({ tiny, onDelete }) {
     const [lastFeeding, setLastFeeding] = useState(null);
     const [sessionDraft, setSessionDraft] = useState(null);
     const [isRestored, setIsRestored] = useState(false);
+    const [showDiaperConfirm, setShowDiaperConfirm] = useState(false);
 
     const feedDurationMinutes = FEED_DURATION_MINUTES_DEFAULT;
     const burpDurationMinutes = BURP_DURATION_MINUTES_DEFAULT;
@@ -280,6 +282,7 @@ export default function TinyCard({ tiny, onDelete }) {
             startedAtMs: now,
         });
     }
+
 
     function handleMlSubmit() {
         const ml = parseInt(mlAmount, 10);
@@ -646,8 +649,20 @@ export default function TinyCard({ tiny, onDelete }) {
                 />
             ) : null}
 
+            {showDiaperConfirm ? (
+                <PoopConfirmation
+                    tiny={tiny}
+                    onSave={() => {
+                        setShowDiaperConfirm(false);
+                    }}
+                    onCancel={() => {
+                        setShowDiaperConfirm(false);
+                    }}
+                />
+            ) : null}
+
             {/* Action buttons */}
-            {open && !isFeedingActive && !isBurpingActive && !showMlInput && !showConfirmation && (
+            {open && !isFeedingActive && !isBurpingActive && !showMlInput && !showConfirmation && !showDiaperConfirm && (
                 <div
                     style={{
                         paddingTop: 12,
@@ -665,7 +680,8 @@ export default function TinyCard({ tiny, onDelete }) {
                         iconSrc={diaperIcon}
                         onClick={(e) => {
                             e.stopPropagation();
-                            console.log("Diaper");
+                            setOpen(false);
+                            setShowDiaperConfirm(true);
                         }}
                     />
                     <ActionButton
